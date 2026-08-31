@@ -11,6 +11,7 @@ jobs:
         with: {python-version: '3.11'}
       - run: python -m pip install --upgrade pytest
       - run: python -m pytest -q
+
   real-trivy-consumer:
     runs-on: ubuntu-latest
     steps:
@@ -42,3 +43,89 @@ jobs:
           test "$code" = "0" -o "$code" = "1" -o "$code" = "2"
           node -e "const fs=require('fs'); const g=JSON.parse(fs.readFileSync('gate.json')); const r=JSON.parse(fs.readFileSync('out/receipt.json')); if(g.receiptVerdict!==r.verdict || (r.verdict==='findings' && g.decision!=='fail') || (r.verdict==='clean' && g.decision==='fail')) process.exit(1);"
           node -e "const fs=require('fs'),c=require('crypto'); const a=fs.readFileSync('artifacts/requirements.txt'); const e=fs.readFileSync('out/evidence.json'); const r=JSON.parse(fs.readFileSync('out/receipt.json')); if(r.scanned_artifact_digest!=='sha256:'+c.createHash('sha256').update(a).digest('hex')) process.exit(1); if(r.evidence_digest!=='sha256:'+c.createHash('sha256').update(e).digest('hex')) process.exit(1); if(r.scanner_version!=='0.74.0') process.exit(1);"
+
+  real-osv-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+
+      - name: Download and verify pinned OSV-Scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o osv-scanner https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_linux_amd64
+          echo 'f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be  osv-scanner' | sha256sum -c -
+          chmod +x osv-scanner
+          test "$(./osv-scanner --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)" = '2.5.1'
+
+      - name: Run real OSV producer and current consumer
+        id: osv_runtime
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out-osv
+          python -m src.osv_producer --osv ./osv-scanner --artifact artifacts/requirements.txt --out out-osv
+
+          git clone https://github.com/yandexuanxuan/mcp-evidence-gate.git core-osv
+          git -C core-osv checkout --detach f736023aa23c48e9f667325f84282c8546c4aa57
+          corepack enable
+          corepack prepare pnpm@10.33.4 --activate
+          pnpm --dir core-osv install --frozen-lockfile
+          pnpm --dir core-osv build
+
+          set +e
+          node core-osv/dist/cli.js verify \
+            --receipt out-osv/receipt.json \
+            --artifact artifacts/requirements.txt \
+            --evidence out-osv/evidence.json \
+            --policy permissive \
+            --format json > gate-osv.json
+          gate_code=$?
+          set -e
+          test "$gate_code" = "0" -o "$gate_code" = "1"
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const receipt = JSON.parse(fs.readFileSync('out-osv/receipt.json'));
+          const evidence = JSON.parse(fs.readFileSync('out-osv/evidence.json'));
+          const gate = JSON.parse(fs.readFileSync('gate-osv.json'));
+          const artifact = fs.readFileSync('artifacts/requirements.txt');
+          const evidenceBytes = fs.readFileSync('out-osv/evidence.json');
+          const raw = fs.readFileSync('out-osv/osv.raw.json');
+          const sha = b => crypto.createHash('sha256').update(b).digest('hex');
+
+          if (receipt.scanner !== 'osv-scanner') process.exit(1);
+          if (receipt.scanner_version !== '2.5.1') process.exit(1);
+          if (!['clean', 'findings'].includes(receipt.verdict)) process.exit(1);
+          if (receipt.scanned_artifact_digest !== 'sha256:' + sha(artifact)) process.exit(1);
+          if (receipt.evidence_digest !== 'sha256:' + sha(evidenceBytes)) process.exit(1);
+          if (evidence.scanner?.binary_sha256 !== 'f9f25499a2c8cc367b3af45df2ea7eeca7fbccceab9c35079968f4b3652194be') process.exit(1);
+          if (![0, 1].includes(evidence.invocation?.exit_code)) process.exit(1);
+          if (evidence.raw_report?.sha256 !== sha(raw)) process.exit(1);
+          if (evidence.scanner_database?.source !== 'https://osv.dev') process.exit(1);
+          if (evidence.scanner_database?.snapshot !== 'unavailable') process.exit(1);
+          if (gate.receiptVerdict !== receipt.verdict) process.exit(1);
+          if (receipt.verdict === 'findings' && gate.decision !== 'fail') process.exit(1);
+          if (receipt.verdict === 'clean' && !['pass', 'warn'].includes(gate.decision)) process.exit(1);
+          NODE
+
+      - name: Upload OSV runtime evidence
+        if: steps.osv_runtime.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: osv-runtime-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            out-osv/
+            gate-osv.json
+
+      - name: Enforce OSV runtime result
+        if: steps.osv_runtime.outcome != 'skipped'
+        env:
+          OSV_RUNTIME_OUTCOME: ${{ steps.osv_runtime.outcome }}
+        run: test "$OSV_RUNTIME_OUTCOME" = success
