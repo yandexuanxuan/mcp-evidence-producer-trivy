@@ -103,6 +103,41 @@ def test_malformed_json_is_inconclusive(monkeypatch, tmp_path: Path) -> None:
     assert receipt["verdict"] == "inconclusive"
 
 
+def test_valid_exit_with_unmappable_report_is_inconclusive(monkeypatch, tmp_path: Path) -> None:
+    binary, artifact = _setup_verified_binary(monkeypatch, tmp_path)
+    malformed_but_json = json.dumps(
+        {
+            "results": [
+                {
+                    "source": {"path": str(artifact.resolve()), "type": "lockfile"},
+                    "packages": [],
+                }
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        osv_producer.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=malformed_but_json, stderr=""),
+    )
+    out = tmp_path / "out"
+    assert osv_producer.run(str(binary), artifact, out) == 1
+    receipt = json.loads((out / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["verdict"] == "inconclusive"
+    assert (out / "evidence.json").exists()
+
+
+def test_verified_binary_with_wrong_version_is_inconclusive(monkeypatch, tmp_path: Path) -> None:
+    binary, artifact = _setup_verified_binary(monkeypatch, tmp_path)
+    monkeypatch.setattr(osv_producer, "osv_version", lambda _: "2.5.0")
+    out = tmp_path / "out"
+    assert osv_producer.run(str(binary), artifact, out) == 1
+    receipt = json.loads((out / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["verdict"] == "inconclusive"
+    assert receipt["scanner_version"] == "2.5.0"
+    assert not (out / "evidence.json").exists()
+
+
 def test_unverified_binary_is_inconclusive(tmp_path: Path) -> None:
     binary = tmp_path / "osv-scanner"
     binary.write_bytes(b"wrong-binary")
