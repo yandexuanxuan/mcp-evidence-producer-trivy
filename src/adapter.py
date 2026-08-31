@@ -19,10 +19,17 @@ def map_report(raw: dict[str, Any], *, artifact_ref: str, artifact_sha256: str,
     reports = raw.get("Results")
     if not isinstance(reports, list):
         raise ValueError("malformed_trivy_report")
+    trivy = raw.get("Trivy")
+    if not isinstance(trivy, dict) or not isinstance(trivy.get("Version"), str):
+        raise ValueError("malformed_trivy_report")
+    if not isinstance(raw.get("ArtifactName"), str) or not raw["ArtifactName"]:
+        raise ValueError("malformed_trivy_report")
     if any(not isinstance(item, dict) for item in reports):
         raise ValueError("malformed_trivy_report")
     findings = 0
     for item in reports:
+        if not all(isinstance(item.get(k), str) and item.get(k) for k in ("Target", "Class", "Type")):
+            raise ValueError("malformed_trivy_report")
         vulnerabilities = item.get("Vulnerabilities")
         if vulnerabilities is not None and not isinstance(vulnerabilities, list):
             raise ValueError("malformed_trivy_report")
