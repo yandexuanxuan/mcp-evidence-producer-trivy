@@ -6,6 +6,7 @@ from typing import Any
 
 SCOPE = "dependency-vulnerabilities"
 PROFILE = "registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22"
+ALLOWED_LOCKFILE_RESULT_SOURCE_TYPES = {"lockfile", "unknown"}
 
 
 def _now() -> str:
@@ -28,7 +29,7 @@ def map_report(
         raise ValueError("malformed_osv_report")
 
     expected_artifact = Path(artifact_ref).resolve()
-    saw_artifact_source = False
+    saw_primary_lockfile_source = False
     package_count = 0
     finding_count = 0
 
@@ -43,11 +44,12 @@ def map_report(
         source_type = source.get("type")
         if not isinstance(source_path, str) or not source_path:
             raise ValueError("malformed_osv_report")
-        if source_type != "lockfile":
-            raise ValueError("unexpected_osv_source_type")
         if Path(source_path).resolve() != expected_artifact:
             raise ValueError("artifact_ref_mismatch")
-        saw_artifact_source = True
+        if source_type not in ALLOWED_LOCKFILE_RESULT_SOURCE_TYPES:
+            raise ValueError("unexpected_osv_source_type")
+        if source_type == "lockfile":
+            saw_primary_lockfile_source = True
 
         packages = result.get("packages")
         if not isinstance(packages, list):
@@ -74,10 +76,11 @@ def map_report(
                     raise ValueError("malformed_osv_report")
                 finding_count += 1
 
-    if not saw_artifact_source or package_count == 0:
+    if not saw_primary_lockfile_source or package_count == 0:
         # OSV-Scanner reserves exit 128 for no packages. A 0/1 report that does
-        # not bind at least one parsed package to the requested lockfile is not
-        # admissible as evidence of a clean/findings verdict.
+        # not contain at least one primary lockfile source and parsed package is
+        # not admissible as evidence of a clean/findings verdict. OSV v2.5.1 may
+        # additionally emit same-path `unknown` records for resolved packages.
         raise ValueError("osv_no_packages_in_report")
 
     if scanner_exit_code not in (0, 1):
