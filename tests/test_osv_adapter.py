@@ -58,6 +58,31 @@ def test_findings_exit_maps_findings(tmp_path: Path) -> None:
     assert receipt["verdict"] == "findings"
 
 
+def test_same_path_unknown_transitive_source_is_admissible_with_primary_lockfile(tmp_path: Path) -> None:
+    artifact = tmp_path / "requirements.txt"
+    artifact.write_text("requests==2.31.0\n", encoding="utf-8")
+    raw = raw_report(str(artifact), [{"id": "GHSA-direct"}])
+    raw["results"].append(
+        {
+            "source": {"path": str(artifact), "type": "unknown"},
+            "packages": [
+                {
+                    "package": {"name": "idna", "version": "3.9.0", "ecosystem": "PyPI"},
+                    "vulnerabilities": [{"id": "GHSA-transitive"}],
+                }
+            ],
+        }
+    )
+    receipt = map_report(
+        raw,
+        artifact_ref=str(artifact),
+        artifact_sha256="a" * 64,
+        scanner_version="2.5.1",
+        scanner_exit_code=1,
+    )
+    assert receipt["verdict"] == "findings"
+
+
 @pytest.mark.parametrize(
     ("exit_code", "vulns"),
     [(0, [{"id": "GHSA-example-1234"}]), (1, [])],
@@ -75,13 +100,24 @@ def test_exit_code_and_json_verdict_must_agree(tmp_path: Path, exit_code: int, v
         )
 
 
-def test_report_must_bind_source_to_requested_lockfile(tmp_path: Path) -> None:
+def test_report_must_bind_every_source_to_requested_lockfile(tmp_path: Path) -> None:
     artifact = tmp_path / "requirements.txt"
     artifact.write_text("requests==2.31.0\n", encoding="utf-8")
-    other = tmp_path / "other.txt"
+    raw = raw_report(str(artifact))
+    raw["results"].append(
+        {
+            "source": {"path": str(tmp_path / "other.txt"), "type": "unknown"},
+            "packages": [
+                {
+                    "package": {"name": "idna", "version": "3.9.0", "ecosystem": "PyPI"},
+                    "vulnerabilities": [],
+                }
+            ],
+        }
+    )
     with pytest.raises(ValueError, match="artifact_ref_mismatch"):
         map_report(
-            raw_report(str(other)),
+            raw,
             artifact_ref=str(artifact),
             artifact_sha256="a" * 64,
             scanner_version="2.5.1",
@@ -102,7 +138,22 @@ def test_empty_results_cannot_be_clean(tmp_path: Path) -> None:
         )
 
 
-def test_non_lockfile_source_is_rejected(tmp_path: Path) -> None:
+def test_unknown_only_sources_cannot_establish_primary_lockfile_binding(tmp_path: Path) -> None:
+    artifact = tmp_path / "requirements.txt"
+    artifact.write_text("requests==2.31.0\n", encoding="utf-8")
+    raw = raw_report(str(artifact))
+    raw["results"][0]["source"]["type"] = "unknown"
+    with pytest.raises(ValueError, match="osv_no_packages_in_report"):
+        map_report(
+            raw,
+            artifact_ref=str(artifact),
+            artifact_sha256="a" * 64,
+            scanner_version="2.5.1",
+            scanner_exit_code=0,
+        )
+
+
+def test_unrelated_source_type_is_rejected(tmp_path: Path) -> None:
     artifact = tmp_path / "requirements.txt"
     artifact.write_text("requests==2.31.0\n", encoding="utf-8")
     raw = raw_report(str(artifact))
