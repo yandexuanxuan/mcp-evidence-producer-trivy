@@ -32,11 +32,13 @@ jobs:
           git clone https://github.com/yandexuanxuan/mcp-evidence-gate.git core
           git -C core checkout --detach d404b38f0ac0303438b561fe7358b0eec487c962
           corepack enable
+          corepack prepare pnpm@10.33.4 --activate
           pnpm --dir core install --frozen-lockfile
           pnpm --dir core build
           set +e
           node core/dist/cli.js verify --receipt out/receipt.json --artifact artifacts/requirements.txt --evidence out/evidence.json --policy permissive --format json > gate.json
           code=$?
           set -e
-          node -e "const fs=require('fs'); const g=JSON.parse(fs.readFileSync('gate.json')); const r=JSON.parse(fs.readFileSync('out/receipt.json')); if(g.receiptVerdict!==r.verdict || (r.verdict==='findings' && g.decision!=='fail') || (r.verdict==='clean' && g.decision==='fail')) process.exit(1); if(![0,1,2].includes(Number(process.env.CODE||'$code'))) process.exit(1);"
+          test "$code" = "0" -o "$code" = "1" -o "$code" = "2"
+          node -e "const fs=require('fs'); const g=JSON.parse(fs.readFileSync('gate.json')); const r=JSON.parse(fs.readFileSync('out/receipt.json')); if(g.receiptVerdict!==r.verdict || (r.verdict==='findings' && g.decision!=='fail') || (r.verdict==='clean' && g.decision==='fail')) process.exit(1);"
           node -e "const fs=require('fs'),c=require('crypto'); const a=fs.readFileSync('artifacts/requirements.txt'); const e=fs.readFileSync('out/evidence.json'); const r=JSON.parse(fs.readFileSync('out/receipt.json')); if(r.scanned_artifact_digest!=='sha256:'+c.createHash('sha256').update(a).digest('hex')) process.exit(1); if(r.evidence_digest!=='sha256:'+c.createHash('sha256').update(e).digest('hex')) process.exit(1); if(r.scanner_version!=='0.74.0') process.exit(1);"

@@ -10,6 +10,25 @@ def test_malformed_raw_report_never_becomes_clean():
         raise AssertionError("malformed raw report must fail closed")
 
 
+def test_incomplete_result_never_becomes_clean():
+    try:
+        map_report({"Trivy": {"Version": "0.74.0"}, "ArtifactName": "a", "Results": [{}]}, artifact_ref="a", artifact_sha256="a" * 64, scanner_version="0.74.0")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("incomplete result must fail closed")
+
+
+def test_raw_identity_mismatch_is_rejected():
+    raw = {"Trivy": {"Version": "999.0.0"}, "ArtifactName": "different", "Results": []}
+    try:
+        map_report(raw, artifact_ref="expected", artifact_sha256="a" * 64, scanner_version="0.74.0")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("raw scanner/artifact identity mismatch must fail closed")
+
+
 def test_malformed_result_element_never_becomes_clean():
     try:
         map_report({"Results": ["corrupt"]}, artifact_ref="a", artifact_sha256="a" * 64, scanner_version="0.74.0")
