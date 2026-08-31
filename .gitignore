@@ -1,6 +1,14 @@
 out/trivy-cache/
 vendor/trivy.exe
 vendor/*.zip
+tools/
+vendor/contrib/
+out2/
+out3/
+linux-trivy.tar.gz
+trivy
+LICENSE
+contrib/
 .pytest_cache/
 __pycache__/
 src/__pycache__/

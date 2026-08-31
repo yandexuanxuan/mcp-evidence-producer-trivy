@@ -8,6 +8,11 @@ from typing import Any
 from .adapter import map_report, inconclusive_receipt
 
 PRODUCER_VERSION = "0.1.0"
+PINNED_TRIVY_VERSION = "0.74.0"
+PINNED_TRIVY_SHA256 = {
+    "win32": "4c532e1f28f53282dc364671e87381cd77760fa9cafab143f576449c2207cdd5",
+    "linux": "d89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791",
+}
 
 
 def sha256(path: Path) -> str:
@@ -46,10 +51,25 @@ def run(binary: str, artifact: Path, out: Path) -> int:
     raw_path, stderr_path = out / "trivy.raw.json", out / "trivy.stderr.log"
     artifact_hash = sha256(artifact)
     try:
+        binary_hash = sha256(Path(binary))
+    except OSError:
+        binary_hash = None
+    expected_binary_hash = PINNED_TRIVY_SHA256.get(sys.platform)
+    if expected_binary_hash is None or binary_hash != expected_binary_hash:
+        receipt = inconclusive_receipt(artifact_ref=str(artifact), artifact_sha256=artifact_hash,
+                                       scanner_version="unverified", reason="evidence_unavailable")
+        (out / "receipt.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return 1
+    try:
         version = trivy_version(binary)
     except (OSError, subprocess.CalledProcessError):
         receipt = inconclusive_receipt(artifact_ref=str(artifact), artifact_sha256=artifact_hash,
                                        scanner_version="unavailable")
+        (out / "receipt.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return 1
+    if version != PINNED_TRIVY_VERSION:
+        receipt = inconclusive_receipt(artifact_ref=str(artifact), artifact_sha256=artifact_hash,
+                                       scanner_version=version, reason="evidence_unavailable")
         (out / "receipt.json").write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return 1
     started = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
