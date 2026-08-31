@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
@@ -22,8 +23,12 @@ def map_report(raw: dict[str, Any], *, artifact_ref: str, artifact_sha256: str,
     trivy = raw.get("Trivy")
     if not isinstance(trivy, dict) or not isinstance(trivy.get("Version"), str):
         raise ValueError("malformed_trivy_report")
+    if trivy["Version"] != scanner_version:
+        raise ValueError("trivy_version_mismatch")
     if not isinstance(raw.get("ArtifactName"), str) or not raw["ArtifactName"]:
         raise ValueError("malformed_trivy_report")
+    if Path(raw["ArtifactName"]).resolve() != Path(artifact_ref).resolve():
+        raise ValueError("artifact_ref_mismatch")
     if any(not isinstance(item, dict) for item in reports):
         raise ValueError("malformed_trivy_report")
     findings = 0
