@@ -1,0 +1,14 @@
+{
+  "attestation": "publisher-asserted",
+  "evidence_digest": "sha256:c852c671f7e86742c63a30838dbe481ddd647088d0c3973cb02341f49b6057c5",
+  "policy_profile": "registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22",
+  "scan_scope": [
+    "dependency-vulnerabilities"
+  ],
+  "scanned_artifact_digest": "sha256:3689190d8460c3a48b04e6c81c4ad290187f622d32ceea5f4bee907e40957293",
+  "scanned_artifact_ref": "D:\\Projects\\mcp-evidence-producer-trivy\\artifacts\\requirements.txt",
+  "scanned_at": "2026-08-31T14:49:25Z",
+  "scanner": "trivy",
+  "scanner_version": "0.74.0",
+  "verdict": "findings"
+}

@@ -1,0 +1,4 @@
+2026-08-31T22:49:23+08:00	INFO	[vuln] Vulnerability scanning is enabled
+2026-08-31T22:49:23+08:00	WARN	[pip] Unable to find python `site-packages` directory. License detection is skipped.	err="site-packages directory not found"
+2026-08-31T22:49:23+08:00	INFO	Number of language-specific files	num=1
+2026-08-31T22:49:23+08:00	INFO	[pip] Detecting vulnerabilities...

@@ -1,0 +1,49 @@
+{
+  "artifact": {
+    "ref": "D:\\Projects\\mcp-evidence-producer-trivy\\artifacts\\requirements.txt",
+    "sha256": "3689190d8460c3a48b04e6c81c4ad290187f622d32ceea5f4bee907e40957293",
+    "size": 90
+  },
+  "invocation": {
+    "argv": [
+      "D:\\Projects\\mcp-evidence-producer-trivy\\vendor\\trivy.exe",
+      "fs",
+      "--format",
+      "json",
+      "--output",
+      "D:\\Projects\\mcp-evidence-producer-trivy\\out\\trivy.raw.json",
+      "--scanners",
+      "vuln",
+      "--exit-code",
+      "0",
+      "D:\\Projects\\mcp-evidence-producer-trivy\\artifacts\\requirements.txt"
+    ],
+    "completed_at": "2026-08-31T14:49:23Z",
+    "exit_code": 0,
+    "started_at": "2026-08-31T14:49:23Z"
+  },
+  "producer": {
+    "name": "mcp-evidence-producer-trivy",
+    "version": "0.1.0"
+  },
+  "raw_report": {
+    "path": "D:\\Projects\\mcp-evidence-producer-trivy\\out\\trivy.raw.json",
+    "sha256": "ee7892f68f3ae0f7441b58a3d283cb21ea44d790f4f630055c1ba8f14317117c"
+  },
+  "scanner": {
+    "name": "trivy",
+    "version": "0.74.0"
+  },
+  "scanner_database": {
+    "metadata": {
+      "DownloadedAt": "2026-08-31T14:45:22.4996083Z",
+      "NextUpdate": "2026-09-01T13:59:52.780690593Z",
+      "UpdatedAt": "2026-08-31T13:59:52.78069098Z",
+      "Version": 2
+    },
+    "trivy_db_path": "D:\\Projects\\mcp-evidence-producer-trivy\\out\\trivy-cache\\db\\trivy.db",
+    "trivy_db_sha256": "6bcd9c0b5055a7364350bfc664ad6a8733b3c3ef99e7fd65024bbad1beedbee1",
+    "trivy_db_size": 1331253248
+  },
+  "schema_version": "project-defined-evidence-manifest-v1"
+}

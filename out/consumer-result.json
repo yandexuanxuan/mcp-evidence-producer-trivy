@@ -1,0 +1,48 @@
+{
+  "tool": "mcp-evidence-gate",
+  "version": "0.1.0-alpha.3",
+  "profile": "registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22",
+  "policy": "permissive",
+  "receiptVerdict": "findings",
+  "decision": "fail",
+  "evaluatedAt": "2026-08-31T14:49:44.366Z",
+  "checks": [
+    {
+      "id": "receipt_structure",
+      "status": "pass"
+    },
+    {
+      "id": "artifact_binding",
+      "status": "pass",
+      "expected": "sha256:3689190d8460c3a48b04e6c81c4ad290187f622d32ceea5f4bee907e40957293",
+      "actual": "sha256:3689190d8460c3a48b04e6c81c4ad290187f622d32ceea5f4bee907e40957293"
+    },
+    {
+      "id": "freshness",
+      "status": "not_present",
+      "reason": "freshness_not_declared"
+    },
+    {
+      "id": "scan_scope",
+      "status": "pass"
+    },
+    {
+      "id": "inconclusive_reason",
+      "status": "not_present",
+      "reason": "inconclusive_reason_not_required"
+    },
+    {
+      "id": "evidence_binding",
+      "status": "pass",
+      "expected": "sha256:c852c671f7e86742c63a30838dbe481ddd647088d0c3973cb02341f49b6057c5",
+      "actual": "sha256:c852c671f7e86742c63a30838dbe481ddd647088d0c3973cb02341f49b6057c5"
+    }
+  ],
+  "reasons": [
+    {
+      "code": "receipt_findings",
+      "decision": "fail",
+      "detail": "Receipt verdict reports findings."
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from typing import Any
+
+SCOPE = "dependency-vulnerabilities"
+PROFILE = "registry-pr-1404@20747d3253ba8638161dd95f1cec70df02993c22"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def map_report(raw: dict[str, Any], *, artifact_ref: str, artifact_sha256: str,
+               scanner_version: str, scanned_at: str | None = None,
+               evidence_digest: str | None = None, rule_set_ref: str | None = None) -> dict[str, Any]:
+    """Map one parsed Trivy fs JSON report without changing scanner semantics."""
+    reports = raw.get("Results")
+    if not isinstance(reports, list):
+        raise ValueError("malformed_trivy_report")
+    findings = sum(len(item.get("Vulnerabilities") or []) for item in reports if isinstance(item, dict))
+    receipt: dict[str, Any] = {
+        "scanner": "trivy",
+        "scanner_version": scanner_version,
+        "scanned_artifact_ref": artifact_ref,
+        "scanned_artifact_digest": f"sha256:{artifact_sha256}",
+        "scan_scope": [SCOPE],
+        "verdict": "findings" if findings else "clean",
+        "scanned_at": scanned_at or _now(),
+        "attestation": "publisher-asserted",
+        "policy_profile": PROFILE,
+    }
+    if evidence_digest:
+        receipt["evidence_digest"] = evidence_digest
+    if rule_set_ref:
+        receipt["rule_set_ref"] = rule_set_ref
+    return receipt
+
+
+def inconclusive_receipt(*, artifact_ref: str, artifact_sha256: str, scanner_version: str,
+                         reason: str = "evidence_unavailable", scanned_at: str | None = None) -> dict[str, Any]:
+    return {
+        "scanner": "trivy", "scanner_version": scanner_version,
+        "scanned_artifact_ref": artifact_ref,
+        "scanned_artifact_digest": f"sha256:{artifact_sha256}",
+        "scan_scope": [SCOPE], "verdict": "inconclusive",
+        "inconclusive_reason": reason, "scanned_at": scanned_at or _now(),
+        "attestation": "publisher-asserted", "policy_profile": PROFILE,
+    }
