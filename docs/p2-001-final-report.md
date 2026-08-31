@@ -26,4 +26,4 @@ The immutable consumer command used alpha.3 at `d404b38f0ac0303438b561fe7358b0ee
 | EXTERNAL_RUNTIME | PASS |
 | P2_001_COMPLETE | NO — remote promotion and dogfood PR were not authorized/executed in this local phase |
 
-`PRODUCER_FINAL_HEAD`: local working tree after fail-closed pinning (base commit `206bb5d`). `PRODUCER_CI_RUN`: not run. `DOGFOOD_USES_PRODUCER_SHA`: not set. `DOGFOOD_RUN`: not run. `UNRESOLVED_REVIEW_THREADS`: remote promotion and dogfood exact-head closure. `EXTERNAL_UNKNOWN`: remote repository/PR/CI and dogfood exact-head closure remain unknown.
+`PRODUCER_FINAL_HEAD`: pending CI (`5e954e7` is the promotion baseline). `PRODUCER_CI_RUN`: pending. `DOGFOOD_USES_PRODUCER_SHA`: not set. `DOGFOOD_RUN`: not run. `UNRESOLVED_REVIEW_THREADS`: remote CI/review and dogfood exact-head closure. `EXTERNAL_UNKNOWN`: remote CI and dogfood exact-head closure remain unknown.
