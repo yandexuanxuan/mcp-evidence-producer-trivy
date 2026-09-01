@@ -17,7 +17,7 @@ INDEX_MEDIA_TYPES = {OCI_INDEX, DOCKER_INDEX}
 MANIFEST_MEDIA_TYPES = {OCI_MANIFEST, DOCKER_MANIFEST}
 ACCEPT = ", ".join([OCI_INDEX, DOCKER_INDEX, OCI_MANIFEST, DOCKER_MANIFEST])
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-BEARER_RE = re.compile(r'^Bearer\s+(.*)$', re.IGNORECASE)
+BEARER_RE = re.compile(r"^Bearer\s+(.*)$", re.IGNORECASE)
 PARAM_RE = re.compile(r'(\w+)="([^"]*)"')
 
 
@@ -100,7 +100,11 @@ def _validate_digest(value: object, *, label: str) -> str:
     return value
 
 
-def _decode_document(response: ManifestResponse, *, expected_digest: str | None = None) -> tuple[dict[str, object], str, str]:
+def _decode_document(
+    response: ManifestResponse,
+    *,
+    expected_digest: str | None = None,
+) -> tuple[dict[str, object], str, str]:
     actual_digest = sha256_bytes(response.body)
     if expected_digest is not None and actual_digest != expected_digest:
         raise OciIdentityError("manifest_body_digest_mismatch")
@@ -114,8 +118,7 @@ def _decode_document(response: ManifestResponse, *, expected_digest: str | None 
         raise OciIdentityError("manifest_json_invalid") from exc
     if not isinstance(document, dict):
         raise OciIdentityError("manifest_json_not_object")
-    media_type = _media_type(response, document)
-    return document, media_type, actual_digest
+    return document, _media_type(response, document), actual_digest
 
 
 def _select_platform_descriptor(
@@ -163,7 +166,14 @@ def resolve_oci_identity(
     reference = parse_reference(requested_ref)
     expected_root = reference.reference if reference.reference_kind == "digest" else None
     root_response = fetch_manifest(reference.registry, reference.repository, reference.reference)
-    root_document, root_media_type, root_digest = _decode_document(root_response, expected_digest=expected_root)
+    root_document, root_media_type, root_digest = _decode_document(
+        root_response,
+        expected_digest=expected_root,
+    )
+
+    requested_platform: dict[str, str] = {"os": os_name, "architecture": architecture}
+    if variant is not None:
+        requested_platform["variant"] = variant
 
     selected_descriptor: Mapping[str, object] | None = None
     if root_media_type in INDEX_MEDIA_TYPES:
@@ -175,7 +185,7 @@ def resolve_oci_identity(
         )
         selected_digest = _validate_digest(selected_descriptor.get("digest"), label="platform_descriptor")
         selected_response = fetch_manifest(reference.registry, reference.repository, selected_digest)
-        selected_document, selected_media_type, selected_actual_digest = _decode_document(
+        _, selected_media_type, selected_actual_digest = _decode_document(
             selected_response,
             expected_digest=selected_digest,
         )
@@ -191,16 +201,33 @@ def resolve_oci_identity(
         manifest_digest = selected_actual_digest
         manifest_media_type = selected_media_type
         selection_source = "image-index"
+        platform_verified = True
+        platform_source = "index-descriptor"
     else:
         manifest_body = root_response.body
         manifest_digest = root_digest
         manifest_media_type = root_media_type
         selection_source = "direct-manifest"
+        platform_verified = False
+        platform_source = "caller-requested-unverified"
 
-    platform: dict[str, str] = {"os": os_name, "architecture": architecture}
-    if variant is not None:
-        platform["variant"] = variant
     exact_ref = f"{reference.registry}/{reference.repository}@{manifest_digest}"
+    selected_record: dict[str, object] = {
+        "selection_source": selection_source,
+        "platform": requested_platform,
+        "platform_verified": platform_verified,
+        "platform_source": platform_source,
+        "manifest_digest": manifest_digest,
+        "manifest_media_type": manifest_media_type,
+        "manifest_size": len(manifest_body),
+        "exact_ref": exact_ref,
+    }
+    if selected_descriptor is not None:
+        selected_record["descriptor_digest"] = selected_descriptor["digest"]
+        selected_record["descriptor_size"] = selected_descriptor["size"]
+        if "mediaType" in selected_descriptor:
+            selected_record["descriptor_media_type"] = selected_descriptor["mediaType"]
+
     record: dict[str, object] = {
         "schema_version": "project-defined-oci-artifact-identity-v1",
         "requested_ref": reference.canonical,
@@ -212,29 +239,17 @@ def resolve_oci_identity(
             "media_type": root_media_type,
             "size": len(root_response.body),
         },
-        "selected": {
-            "selection_source": selection_source,
-            "platform": platform,
-            "manifest_digest": manifest_digest,
-            "manifest_media_type": manifest_media_type,
-            "manifest_size": len(manifest_body),
-            "exact_ref": exact_ref,
-        },
+        "selected": selected_record,
     }
-    if selected_descriptor is not None:
-        record["selected"]["descriptor_digest"] = selected_descriptor["digest"]  # type: ignore[index]
-        record["selected"]["descriptor_size"] = selected_descriptor["size"]  # type: ignore[index]
-        if "mediaType" in selected_descriptor:
-            record["selected"]["descriptor_media_type"] = selected_descriptor["mediaType"]  # type: ignore[index]
     return ResolvedOciIdentity(record=record, root_body=root_response.body, manifest_body=manifest_body)
 
 
 class RegistryClient:
     def __init__(self, *, timeout: float = 30.0):
         self.timeout = timeout
-        self._tokens: dict[tuple[str, str], str] = {}
+        self._tokens: dict[tuple[str, str, str], str] = {}
 
-    def _open(self, url: str, headers: Mapping[str, str]) -> urllib.response.addinfourl:
+    def _open(self, url: str, headers: Mapping[str, str]):
         request = urllib.request.Request(url, headers=dict(headers), method="GET")
         return urllib.request.urlopen(request, timeout=self.timeout)
 
@@ -246,9 +261,9 @@ class RegistryClient:
         realm = params.get("realm")
         if not realm or not realm.startswith("https://"):
             raise OciIdentityError("registry_auth_realm_invalid")
-        service = params.get("service")
+        service = params.get("service") or ""
         scope = params.get("scope") or f"repository:{repository}:pull"
-        cache_key = (realm, scope)
+        cache_key = (realm, service, scope)
         if cache_key in self._tokens:
             return self._tokens[cache_key]
         query = {"scope": scope}
@@ -260,7 +275,9 @@ class RegistryClient:
                 payload = json.loads(response.read())
         except (OSError, json.JSONDecodeError) as exc:
             raise OciIdentityError("registry_token_request_failed") from exc
-        token = payload.get("token") or payload.get("access_token") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            raise OciIdentityError("registry_token_missing")
+        token = payload.get("token") or payload.get("access_token")
         if not isinstance(token, str) or not token:
             raise OciIdentityError("registry_token_missing")
         self._tokens[cache_key] = token
@@ -290,4 +307,8 @@ class RegistryClient:
             docker_digest = response.headers.get("Docker-Content-Digest")
         finally:
             response.close()
-        return ManifestResponse(body=body, content_type=content_type, docker_content_digest=docker_digest)
+        return ManifestResponse(
+            body=body,
+            content_type=content_type,
+            docker_content_digest=docker_digest,
+        )
