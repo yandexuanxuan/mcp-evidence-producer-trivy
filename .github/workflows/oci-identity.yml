@@ -1,0 +1,150 @@
+name: oci-exact-identity
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-oci-identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pytest
+      - run: python -m pytest -q tests/test_oci_identity.py tests/test_oci_adapter.py
+
+  real-oci-trivy-consumer:
+    runs-on: ubuntu-latest
+    env:
+      ROOT_REF: ghcr.io/containers/kubernetes-mcp-server@sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82
+      ROOT_DIGEST: sha256:7cba55569933e79d8b877607a0413c62faa23f0b281a99144ebb07f853539c82
+      PLATFORM_DIGEST: sha256:a60d068656fa8b57fb6f55565e439813aca7f44219e3239575c2e749d5f60bf7
+      CORE_SHA: d5abcdc28d6e288da15ec69b16901ec604da5617
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download and verify pinned Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o trivy.tar.gz https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz
+          echo '2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a  trivy.tar.gz' | sha256sum -c -
+          tar -xzf trivy.tar.gz
+          test "$(sha256sum trivy | cut -d' ' -f1)" = 'd89bcc6510a267f11b773398cbf1be5520ce39f9e8b6633178c4487f05b7d791'
+          test "$(./trivy --version | sed -n 's/^Version: //p')" = '0.74.0'
+
+      - name: Resolve exact platform identity and scan that manifest digest
+        id: oci_runtime
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.oci_producer \
+            --trivy ./trivy \
+            --image "$ROOT_REF" \
+            --platform-os linux \
+            --platform-arch amd64 \
+            --out out-oci
+
+          git clone https://github.com/yandexuanxuan/mcp-evidence-gate.git core-oci
+          git -C core-oci checkout --detach "$CORE_SHA"
+          test "$(git -C core-oci rev-parse HEAD)" = "$CORE_SHA"
+          corepack enable
+          corepack prepare pnpm@10.33.4 --activate
+          pnpm --dir core-oci install --frozen-lockfile
+          pnpm --dir core-oci build
+
+          set +e
+          node core-oci/dist/cli.js verify \
+            --receipt out-oci/receipt.json \
+            --artifact out-oci/oci.manifest.json \
+            --evidence out-oci/evidence.json \
+            --policy permissive \
+            --format json > gate-oci.json
+          gate_code=$?
+          set -e
+          test "$gate_code" = 0 -o "$gate_code" = 1
+
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          def load(path):
+              return json.loads(Path(path).read_text(encoding='utf-8'))
+
+          def digest(path):
+              return 'sha256:' + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+          identity = load('out-oci/oci-identity.json')
+          receipt = load('out-oci/receipt.json')
+          evidence = load('out-oci/evidence.json')
+          gate = load('gate-oci.json')
+          root_digest = os.environ['ROOT_DIGEST']
+          platform_digest = os.environ['PLATFORM_DIGEST']
+
+          assert identity['requested_ref'] == os.environ['ROOT_REF']
+          assert identity['requested_reference_kind'] == 'digest'
+          assert identity['root']['digest'] == root_digest
+          assert identity['root']['digest'] == digest('out-oci/oci.index.json')
+          assert identity['root']['digest'] != platform_digest
+          selected = identity['selected']
+          assert selected['selection_source'] == 'image-index'
+          assert selected['platform'] == {'os': 'linux', 'architecture': 'amd64'}
+          assert selected['descriptor_digest'] == platform_digest
+          assert selected['manifest_digest'] == platform_digest
+          assert selected['manifest_digest'] == digest('out-oci/oci.manifest.json')
+          assert selected['exact_ref'] == 'ghcr.io/containers/kubernetes-mcp-server@' + platform_digest
+
+          assert receipt['scanned_artifact_ref'] == selected['exact_ref']
+          assert receipt['scanned_artifact_digest'] == platform_digest
+          assert receipt['scanner'] == 'trivy'
+          assert receipt['scanner_version'] == '0.74.0'
+          assert receipt['verdict'] in {'clean', 'findings'}
+          assert receipt['evidence_digest'] == digest('out-oci/evidence.json')
+
+          assert evidence['artifact']['root_digest'] == root_digest
+          assert evidence['artifact']['exact_ref'] == selected['exact_ref']
+          assert 'sha256:' + evidence['artifact']['sha256'] == platform_digest
+          assert evidence['artifact']['identity_sha256'] == digest('out-oci/oci-identity.json').removeprefix('sha256:')
+          assert evidence['artifact']['index_sha256'] == digest('out-oci/oci.index.json').removeprefix('sha256:')
+          assert evidence['raw_report']['sha256'] == digest('out-oci/trivy.raw.json').removeprefix('sha256:')
+          assert evidence['invocation']['target_exact_ref'] == selected['exact_ref']
+          assert evidence['invocation']['argv'][-1] == selected['exact_ref']
+
+          artifact_binding = next(check for check in gate['checks'] if check['id'] == 'artifact_binding')
+          evidence_binding = next(check for check in gate['checks'] if check['id'] == 'evidence_binding')
+          assert artifact_binding['status'] == 'pass'
+          assert evidence_binding['status'] == 'pass'
+          assert gate['receiptVerdict'] == receipt['verdict']
+          if receipt['verdict'] == 'findings':
+              assert gate['decision'] == 'fail'
+          else:
+              assert gate['decision'] in {'pass', 'warn'}
+          PY
+
+      - name: Upload OCI runtime evidence
+        if: steps.oci_runtime.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: oci-runtime-${{ github.sha }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            out-oci/
+            gate-oci.json
+
+      - name: Enforce OCI runtime result
+        if: steps.oci_runtime.outcome != 'skipped'
+        env:
+          OCI_RUNTIME_OUTCOME: ${{ steps.oci_runtime.outcome }}
+        run: test "$OCI_RUNTIME_OUTCOME" = success
